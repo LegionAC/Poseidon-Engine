@@ -1,6 +1,7 @@
 #include <iostream>
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
+#include <vector>
 
 const char *vertexShaderSource = "#version 330 core\n"
     "layout (location = 0) in vec3 aPos;\n"
@@ -14,20 +15,31 @@ const char *fragmentShaderSource = "#version 330 core\n"
 
     "void main()\n"
     "{\n"
-    "FragColor = vec4(50.0f, 10.0f, 20.0f, 1.0f);\n"
+    "FragColor = vec4(0.1, 0.1, 0.1, 0.1);\n"
     "}\0";
-
-float vertices[] {
-        -0.5f, -0.5f, 0.0f,
-         0.5f, -0.5f, 0.0f,
-         0.0f,  0.5f, 0.0f
-};
 
 unsigned int shaderProgram;
 unsigned int VAO;
 unsigned int VBO;
 
-int initialize() {
+std::vector< std::vector<float> > verticesContainer;
+
+std::vector<float> vertices {
+    -0.9f, -0.5f, 0.0f,
+    0.5f, -0.5f, 0.0f,
+    0.0f,  0.5f, 0.0f
+};
+
+std::vector<float> vertices2 {
+    -0.8f, -0.1f, 0.3f,
+    0.21f, -0.12f, 0.5f,
+    0.0f, 0.0f, 0.0f
+};
+
+int initialize(std::vector<float>* verticesVector, unsigned int verticeBytes) {
+
+    float* vertices = verticesVector->data();
+
     unsigned int vertexShader;
     vertexShader = glCreateShader(GL_VERTEX_SHADER);
     glShaderSource(vertexShader, 1, &vertexShaderSource, NULL);
@@ -43,7 +55,7 @@ int initialize() {
     glCompileShader(fragmentShader); // COMPILE THE FRAGMENT SHADER
 
     shaderProgram = glCreateProgram();
-    
+
     glAttachShader(shaderProgram, vertexShader);
     glAttachShader(shaderProgram, fragmentShader);
     glLinkProgram(shaderProgram);
@@ -60,7 +72,7 @@ int initialize() {
     glBindVertexArray(VAO);
 
     glBindBuffer(GL_ARRAY_BUFFER, VBO);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, verticeBytes, vertices, GL_STATIC_DRAW);
 
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
     glEnableVertexAttribArray(0);
@@ -73,11 +85,45 @@ int initialize() {
     return 0;
 }
 
-int renderObject() {
+int renderObject(unsigned int shaderProgram, unsigned int VAO) {
     glUseProgram(shaderProgram);
     glBindVertexArray(VAO);
     glDrawArrays(GL_TRIANGLES, 0, 3);
 
+    return 0;
+}
+
+struct objData {
+    unsigned int VAO;
+    unsigned int shaderProgram;
+};
+
+int renderViewport(GLFWwindow* userInterface) {
+    verticesContainer.push_back(vertices);
+    verticesContainer.push_back(vertices2);
+
+    std::vector<objData> objsData;
+
+    for (std::vector<float> v : verticesContainer) {
+        initialize(&v, sizeof(v));
+        objData obj;
+        obj.VAO = VAO;
+        obj.shaderProgram = shaderProgram;
+        objsData.push_back(obj);
+    }
+
+    while (!glfwWindowShouldClose(userInterface)) {
+        glClear(GL_COLOR_BUFFER_BIT);
+        for (objData v : objsData) {
+            renderObject(v.shaderProgram, v.VAO);
+        }
+        glfwSwapBuffers(userInterface);
+        glfwPollEvents();
+
+        if (glfwGetKey(userInterface, GLFW_KEY_F6) == GLFW_PRESS) {
+        }
+
+    }
     return 0;
 }
 
@@ -95,14 +141,7 @@ int interface() {
 
     gladLoadGLLoader((GLADloadproc)glfwGetProcAddress);
 
-    initialize();
-
-    while (!glfwWindowShouldClose(userInterface)) {
-        glClear(GL_COLOR_BUFFER_BIT);
-        renderObject();
-        glfwSwapBuffers(userInterface);
-        glfwPollEvents();
-    }
+    renderViewport(userInterface);
 
     return 0;
 }
