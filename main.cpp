@@ -9,20 +9,42 @@
 
 const char *vertexShaderSource = "#version 330 core\n"
     "layout (location = 0) in vec3 aPos;\n"
+    "layout (location = 1) in vec3 aNormal;\n"
+    "out vec3 FragPos;\n"
+    "out vec3 Normal;\n"
     "uniform mat4 model;\n"
     "uniform mat4 view;\n"
     "uniform mat4 projection;\n"
     "void main()\n"
     "{\n"
-    "   gl_Position = projection * view * model * vec4(aPos, 1.0);\n"
+    "   FragPos = vec3(model * vec4(aPos, 1.0));\n"
+    "   Normal = mat3(transpose(inverse(model))) * aNormal;\n"
+    "   gl_Position = projection * view * vec4(FragPos, 1.0);\n"
     "}\0";
 
 const char *fragmentShaderSource = "#version 330 core\n"
     "out vec4 FragColor;\n"
-
+    "in vec3 FragPos;\n"
+    "in vec3 Normal;\n"
+    "uniform vec3 lightPos;\n"
+    "uniform vec3 viewPos;\n"
+    "uniform vec3 lightColor;\n"
+    "uniform vec3 objectColor;\n"
     "void main()\n"
     "{\n"
-    "FragColor = vec4(1.0, 1.0, 1.0, 1.0);\n"
+    "float specularStrength = 0.5;\n"
+    "float ambientStrength = 0.1;\n"
+    "vec3 ambient = ambientStrength * lightColor;\n"
+    "vec3 norm = normalize(Normal);\n"
+    "vec3 lightDir = normalize(lightPos - FragPos);\n"
+    "float diff = max(dot(norm, lightDir), 0.0);\n"
+    "vec3 diffuse = diff * lightColor;\n"
+    "vec3 viewDir = normalize(viewPos - FragPos);\n"
+    "vec3 reflectDir = reflect(-lightDir, norm);\n"
+    "float spec = pow(max(dot(viewDir, reflectDir), 0.0), 32);\n"
+    "vec3 specular = specularStrength * spec * lightColor;\n"
+    "vec3 result = (ambient + diffuse + specular) * objectColor;"
+    "FragColor = vec4(result, 1.0);\n"
     "}\0";
 
 unsigned int shaderProgram;
@@ -44,6 +66,9 @@ float yaw = -90.0f;
 float pitch = 0.0f;
 
 bool firstMouse = true;
+
+glm::vec3 lightColor = glm::vec3(1.0f, 1.0f, 1.0f);
+glm::vec3 objectColor = glm::vec3(1.0f, 1.0f, 1.0f);
 
 int initialize(std::vector<float>* verticesVector, unsigned int verticesBytes) {
 
@@ -83,11 +108,11 @@ int initialize(std::vector<float>* verticesVector, unsigned int verticesBytes) {
     glBindBuffer(GL_ARRAY_BUFFER, VBO);
     glBufferData(GL_ARRAY_BUFFER, verticesBytes, vertices, GL_STATIC_DRAW);
 
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)0);
     glEnableVertexAttribArray(0);
 
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
-    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)(3 * sizeof(float)));
+    glEnableVertexAttribArray(1);
 
     glBindVertexArray(0);
 
@@ -97,22 +122,12 @@ int initialize(std::vector<float>* verticesVector, unsigned int verticesBytes) {
 int renderObject(unsigned int shaderProgram, unsigned int VAO, size_t vectorSize) {
     glUseProgram(shaderProgram);
     glBindVertexArray(VAO);
-    glDrawArrays(GL_TRIANGLES, 0, vectorSize / 3);
+    glDrawArrays(GL_TRIANGLES, 0, vectorSize / 6);
 
     return 0;
 }
 
-int renderCircle(unsigned int resolution, std::vector<float> originVertices, float radius, unsigned int renderedWidth, unsigned int renderedHeight) {
-
-    std::vector<float> vertices;
-
-    float x = originVertices[0];
-    float y = originVertices[1];
-    float z = originVertices[2];
-
-    float operation = 2.0f * 3.1415926f / resolution;
-
-    for (int i{0}; i < resolution; i++) {
+void circle2D(unsigned int renderedWidth, unsigned int renderedHeight, float x, float y, float z, float radius, float operation, unsigned int i, std::vector<float>& vertices) {
         float aspectRatio = (float)renderedWidth / (float)renderedHeight;
         float angle1 = i * operation;
         float angle2 = (i + 1) * operation;
@@ -128,6 +143,80 @@ int renderCircle(unsigned int resolution, std::vector<float> originVertices, flo
         vertices.push_back(x + cos(angle2) * radius);
         vertices.push_back(y + sin(angle2) * radius);
         vertices.push_back(z);
+}
+
+void circle3D(unsigned int renderedWidth, unsigned int renderedHeight, float x, float y, float z, float radius, float operation, unsigned int i, unsigned int j, std::vector<float>& vertices, unsigned int resolution) {
+    float lat1 = i * (3.1415926f / resolution);
+    float lat2 = (i + 1) * (3.1415926f / resolution);
+    float lon1 = j * (2.0f * 3.1415926f / resolution);
+    float lon2 = (j + 1) * (2.0f * 3.1415926f / resolution);
+
+    // Vertex positions
+    glm::vec3 v1 = glm::vec3(
+        x + radius * sin(lat1) * cos(lon1),
+        y + radius * cos(lat1),
+        z + radius * sin(lat1) * sin(lon1)
+    );
+    glm::vec3 v2 = glm::vec3(
+        x + radius * sin(lat1) * cos(lon2),
+        y + radius * cos(lat1),
+        z + radius * sin(lat1) * sin(lon2)
+    );
+    glm::vec3 v3 = glm::vec3(
+        x + radius * sin(lat2) * cos(lon1),
+        y + radius * cos(lat2),
+        z + radius * sin(lat2) * sin(lon1)
+    );
+    glm::vec3 v4 = glm::vec3(
+        x + radius * sin(lat2) * cos(lon2),
+        y + radius * cos(lat2),
+        z + radius * sin(lat2) * sin(lon2)
+    );
+
+    glm::vec3 n1 = glm::normalize(v1 - glm::vec3(x, y, z));
+    glm::vec3 n2 = glm::normalize(v2 - glm::vec3(x, y, z));
+    glm::vec3 n3 = glm::normalize(v3 - glm::vec3(x, y, z));
+    glm::vec3 n4 = glm::normalize(v4 - glm::vec3(x, y, z));
+
+    vertices.push_back(v1.x); vertices.push_back(v1.y); vertices.push_back(v1.z);
+    vertices.push_back(n1.x); vertices.push_back(n1.y); vertices.push_back(n1.z);
+
+    vertices.push_back(v3.x); vertices.push_back(v3.y); vertices.push_back(v3.z);
+    vertices.push_back(n3.x); vertices.push_back(n3.y); vertices.push_back(n3.z);
+
+    vertices.push_back(v2.x); vertices.push_back(v2.y); vertices.push_back(v2.z);
+    vertices.push_back(n2.x); vertices.push_back(n2.y); vertices.push_back(n2.z);
+
+    vertices.push_back(v2.x); vertices.push_back(v2.y); vertices.push_back(v2.z);
+    vertices.push_back(n2.x); vertices.push_back(n2.y); vertices.push_back(n2.z);
+
+    vertices.push_back(v3.x); vertices.push_back(v3.y); vertices.push_back(v3.z);
+    vertices.push_back(n3.x); vertices.push_back(n3.y); vertices.push_back(n3.z);
+
+    vertices.push_back(v4.x); vertices.push_back(v4.y); vertices.push_back(v4.z);
+    vertices.push_back(n4.x); vertices.push_back(n4.y); vertices.push_back(n4.z);
+}
+
+int renderCircle(unsigned int resolution, std::vector<float> originVertices, float radius, unsigned int renderedWidth, unsigned int renderedHeight, bool is3D) {
+
+    std::vector<float> vertices;
+
+    float x = originVertices[0];
+    float y = originVertices[1];
+    float z = originVertices[2];
+
+    float operation = 2.0f * 3.1415926f / resolution;
+
+    if (!is3D) {
+        for (int i = 0; i < resolution; i++) {
+            circle2D(renderedWidth, renderedHeight, x, y, z, radius, operation, i, vertices);
+        }
+    } else {
+        for (int i = 0; i < resolution; i++) {
+            for (int j = 0; j < resolution; j++) {
+                circle3D(renderedWidth, renderedHeight, x, y, z, radius, operation, i, j, vertices, resolution);
+            }
+        }
     }
 
     verticesContainer.push_back(vertices);
@@ -204,28 +293,45 @@ void movementHandler(GLFWwindow* window) {
     glfwSetCursorPosCallback(window, mouse_callback);
 }
 
+void lightingHandler(unsigned int shaderProgram) {
+    // USES PHONG LIGHTING -- DIFFUSE + AMBIENT + SPECULAR COMBINATION
+    unsigned int lightColorLoc = glGetUniformLocation(shaderProgram, "lightColor");
+    unsigned int objectColorLoc = glGetUniformLocation(shaderProgram, "objectColor");
+
+    glUniform3fv(lightColorLoc, 1, glm::value_ptr(::lightColor));
+    glUniform3fv(objectColorLoc, 1, glm::value_ptr(::objectColor));
+
+    glm::vec4 FragColor;
+
+    float ambientStrength = 0.1;
+    glm::vec3 ambient = ambientStrength * lightColor;
+
+    glm::vec3 result = ambient * objectColor;
+    FragColor = glm::vec4(result, 1.0);
+}
+
 int renderViewport(GLFWwindow* userInterface, unsigned int renderedWidth, unsigned int renderedHeight) {
     std::vector<float> vertices {
-     1.0f,  1.0f,  1.0f,
-     1.0f, -1.0f, -1.0f,
-    -1.0f,  1.0f, -1.0f,
-    
-     1.0f,  1.0f,  1.0f,
-    -1.0f, -1.0f,  1.0f,
-     1.0f, -1.0f, -1.0f,
-    
-     1.0f,  1.0f,  1.0f,
-    -1.0f,  1.0f, -1.0f,
-    -1.0f, -1.0f,  1.0f,
-    
-     1.0f, -1.0f, -1.0f,
-    -1.0f, -1.0f,  1.0f,
-    -1.0f,  1.0f, -1.0f
-    };
+    1.0f,  1.0f,  1.0f,    0.577f,  0.577f, -0.577f,
+    1.0f, -1.0f, -1.0f,    0.577f,  0.577f, -0.577f,
+    -1.0f,  1.0f, -1.0f,   0.577f,  0.577f, -0.577f,
+
+    1.0f,  1.0f,  1.0f,    0.577f, -0.577f,  0.577f,
+    -1.0f, -1.0f,  1.0f,   0.577f, -0.577f,  0.577f,
+    1.0f, -1.0f, -1.0f,    0.577f, -0.577f,  0.577f,
+
+    1.0f,  1.0f,  1.0f,   -0.577f,  0.577f,  0.577f,
+    -1.0f,  1.0f, -1.0f,  -0.577f,  0.577f,  0.577f,
+    -1.0f, -1.0f,  1.0f,  -0.577f,  0.577f,  0.577f,
+
+    1.0f, -1.0f, -1.0f,   -0.577f, -0.577f, -0.577f,
+    -1.0f, -1.0f,  1.0f,  -0.577f, -0.577f, -0.577f,
+    -1.0f,  1.0f, -1.0f,  -0.577f, -0.577f, -0.577f,
+};
 
     verticesContainer.push_back(vertices);
 
-    renderCircle(1000, std::vector<float> {0.0f, 0.0f, 0.0f}, 0.1, renderedWidth, renderedHeight);
+    renderCircle(30, std::vector<float> {0.0f, 0.0f, 0.0f}, 0.1, renderedWidth, renderedHeight, true);
 
     std::vector<objData> objsData;
 
@@ -236,14 +342,22 @@ int renderViewport(GLFWwindow* userInterface, unsigned int renderedWidth, unsign
         obj.shaderProgram = shaderProgram;
         obj.vectorSize = v.size();
         objsData.push_back(obj);
+
+        lightingHandler(shaderProgram);
+
     }
 
     while (!glfwWindowShouldClose(userInterface)) {
         movementHandler(userInterface);
-        glClear(GL_COLOR_BUFFER_BIT);
+        glEnable(GL_DEPTH_TEST);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
         glm::mat4 projection = glm::perspective(glm::radians(45.0f), 
         (float)renderedWidth / (float)renderedHeight, 0.1f, 100.0f);
+
+        glm::vec3 lightPos = glm::vec3(3.0f, 3.0f, 3.0f);
+        glm::vec3 lightColor = glm::vec3(1.0f, 1.0f, 1.0f);
+        glm::vec3 objectColor = glm::vec3(1.0f, 1.0f, 1.0f);
 
         for (objData v : objsData) {
             glUseProgram(v.shaderProgram);
@@ -257,6 +371,16 @@ int renderViewport(GLFWwindow* userInterface, unsigned int renderedWidth, unsign
             glUniformMatrix4fv(viewLoc, 1, GL_FALSE, glm::value_ptr(view));
             glUniformMatrix4fv(projLoc, 1, GL_FALSE, glm::value_ptr(projection));
         
+            unsigned int lightPosLoc = glGetUniformLocation(v.shaderProgram, "lightPos");
+            unsigned int viewPosLoc = glGetUniformLocation(v.shaderProgram, "viewPos");
+            unsigned int lightColorLoc = glGetUniformLocation(v.shaderProgram, "lightColor");
+            unsigned int objectColorLoc = glGetUniformLocation(v.shaderProgram, "objectColor");
+    
+            glUniform3fv(lightPosLoc, 1, glm::value_ptr(lightPos));
+            glUniform3fv(viewPosLoc, 1, glm::value_ptr(cameraPos));
+            glUniform3fv(lightColorLoc, 1, glm::value_ptr(lightColor));
+            glUniform3fv(objectColorLoc, 1, glm::value_ptr(objectColor));
+
             renderObject(v.shaderProgram, v.VAO, v.vectorSize);
         }
 
