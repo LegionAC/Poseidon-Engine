@@ -146,55 +146,7 @@ void circle2D(unsigned int renderedWidth, unsigned int renderedHeight, float x, 
 }
 
 void circle3D(unsigned int renderedWidth, unsigned int renderedHeight, float x, float y, float z, float radius, float operation, unsigned int i, unsigned int j, std::vector<float>& vertices, unsigned int resolution) {
-    float lat1 = i * (3.1415926f / resolution);
-    float lat2 = (i + 1) * (3.1415926f / resolution);
-    float lon1 = j * (2.0f * 3.1415926f / resolution);
-    float lon2 = (j + 1) * (2.0f * 3.1415926f / resolution);
 
-    // Vertex positions
-    glm::vec3 v1 = glm::vec3(
-        x + radius * sin(lat1) * cos(lon1),
-        y + radius * cos(lat1),
-        z + radius * sin(lat1) * sin(lon1)
-    );
-    glm::vec3 v2 = glm::vec3(
-        x + radius * sin(lat1) * cos(lon2),
-        y + radius * cos(lat1),
-        z + radius * sin(lat1) * sin(lon2)
-    );
-    glm::vec3 v3 = glm::vec3(
-        x + radius * sin(lat2) * cos(lon1),
-        y + radius * cos(lat2),
-        z + radius * sin(lat2) * sin(lon1)
-    );
-    glm::vec3 v4 = glm::vec3(
-        x + radius * sin(lat2) * cos(lon2),
-        y + radius * cos(lat2),
-        z + radius * sin(lat2) * sin(lon2)
-    );
-
-    glm::vec3 n1 = glm::normalize(v1 - glm::vec3(x, y, z));
-    glm::vec3 n2 = glm::normalize(v2 - glm::vec3(x, y, z));
-    glm::vec3 n3 = glm::normalize(v3 - glm::vec3(x, y, z));
-    glm::vec3 n4 = glm::normalize(v4 - glm::vec3(x, y, z));
-
-    vertices.push_back(v1.x); vertices.push_back(v1.y); vertices.push_back(v1.z);
-    vertices.push_back(n1.x); vertices.push_back(n1.y); vertices.push_back(n1.z);
-
-    vertices.push_back(v3.x); vertices.push_back(v3.y); vertices.push_back(v3.z);
-    vertices.push_back(n3.x); vertices.push_back(n3.y); vertices.push_back(n3.z);
-
-    vertices.push_back(v2.x); vertices.push_back(v2.y); vertices.push_back(v2.z);
-    vertices.push_back(n2.x); vertices.push_back(n2.y); vertices.push_back(n2.z);
-
-    vertices.push_back(v2.x); vertices.push_back(v2.y); vertices.push_back(v2.z);
-    vertices.push_back(n2.x); vertices.push_back(n2.y); vertices.push_back(n2.z);
-
-    vertices.push_back(v3.x); vertices.push_back(v3.y); vertices.push_back(v3.z);
-    vertices.push_back(n3.x); vertices.push_back(n3.y); vertices.push_back(n3.z);
-
-    vertices.push_back(v4.x); vertices.push_back(v4.y); vertices.push_back(v4.z);
-    vertices.push_back(n4.x); vertices.push_back(n4.y); vertices.push_back(n4.z);
 }
 
 int renderCircle(unsigned int resolution, std::vector<float> originVertices, float radius, unsigned int renderedWidth, unsigned int renderedHeight, bool is3D) {
@@ -331,7 +283,7 @@ int renderViewport(GLFWwindow* userInterface, unsigned int renderedWidth, unsign
 
     verticesContainer.push_back(vertices);
 
-    renderCircle(30, std::vector<float> {0.0f, 0.0f, 0.0f}, 0.1, renderedWidth, renderedHeight, true);
+    renderCircle(30, std::vector<float> {0.0f, 0.0f, 0.0f}, 0.1, renderedWidth, renderedHeight, false);
 
     std::vector<objData> objsData;
 
@@ -407,8 +359,8 @@ int interface() {
 
     gladLoadGLLoader((GLADloadproc)glfwGetProcAddress);
 
-    unsigned int renderedWidth = 2560;
-    unsigned int renderedHeight = 1440;
+    unsigned int renderedWidth = width;
+    unsigned int renderedHeight = height;
 
     glViewport(0, 0, renderedWidth, renderedHeight); // PORTION OF SCREEN THAT RENDERING WORKS ACROSS, CURRENTLY USER RESOLUTION
 
