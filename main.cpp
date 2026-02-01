@@ -6,6 +6,84 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
+#include <assimp/Importer.hpp>
+#include <assimp/scene.h>
+#include <assimp/postprocess.h>
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
+#include "shader_m.h"
+#include "camera.h"
+#include "model.h"
+
+using namespace std;
+
+class Shader
+{
+public:
+    // the program ID
+    unsigned int ID;
+  
+    // constructor reads and builds the shader
+    Shader(const char* vertexPath, const char* fragmentPath);
+    // use/activate the shader
+    void use();
+    // utility uniform functions
+    void setBool(const std::string &name, bool value) const;  
+    void setInt(const std::string &name, int value) const;   
+    void setFloat(const std::string &name, float value) const;
+};
+
+struct Vertex {
+    glm::vec3 Position;
+    glm::vec3 Normal;
+    glm::vec2 TexCoords;
+};
+
+struct Texture {
+    unsigned int id;
+    std::string type;
+    std::string path;
+};
+
+class Mesh {
+    public:
+        // mesh data
+        std::vector<Vertex>       vertices;
+        std::vector<unsigned int> indices;
+        std::vector<Texture>      textures;
+
+        Mesh(std::vector<Vertex> vertices, std::vector<unsigned int> indices, std::vector<Texture> textures);
+
+        void Draw(Shader &shader);
+    private:
+        //  render data
+        unsigned int VAO, VBO, EBO;
+
+        void setupMesh();
+};  
+
+class Model 
+{
+    public:
+        Model(char *path)
+        {
+            loadModel(path);
+        }
+        void ObjToRender();
+        void Draw(Shader &shader);
+    private:
+        // model data
+        std::vector<Mesh> meshes;
+        std::string directory;
+
+        void loadModel(std::string path);
+        void processNode(aiNode *node, const aiScene *scene);
+        int TextureFromFile(const char *path, const std::string &directory);
+        Mesh processMesh(aiMesh *mesh, const aiScene *scene);
+        vector<Texture> textures_loaded; 
+        std::vector<Texture> loadMaterialTextures(aiMaterial *mat, aiTextureType type, 
+                                             std::string typeName);
+};
 
 const char *vertexShaderSource = "#version 330 core\n"
     "layout (location = 0) in vec3 aPos;\n"
@@ -262,28 +340,288 @@ void lightingHandler(unsigned int shaderProgram) {
     FragColor = glm::vec4(result, 1.0);
 }
 
+int Model::TextureFromFile(const char *path, const std::string &directory)
+{
+    std::string filename = std::string(path);
+    filename = directory + '/' + filename;
+
+    unsigned int textureID;
+    glGenTextures(1, &textureID);
+
+    int width, height, nrComponents;
+    unsigned char *data = stbi_load(filename.c_str(), &width, &height, &nrComponents, 0);
+    if (data)
+    {
+        GLenum format;
+        if (nrComponents == 1)
+            format = GL_RED;
+        else if (nrComponents == 3)
+            format = GL_RGB;
+        else if (nrComponents == 4)
+            format = GL_RGBA;
+
+        glBindTexture(GL_TEXTURE_2D, textureID);
+        glTexImage2D(GL_TEXTURE_2D, 0, format, width, height, 0, format, GL_UNSIGNED_BYTE, data);
+        glGenerateMipmap(GL_TEXTURE_2D);
+
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+        stbi_image_free(data);
+    }
+    else
+    {
+        std::cout << "Texture failed to load at path: " << path << std::endl;
+        stbi_image_free(data);
+    }
+
+    return textureID;
+
+}
+
+vector<Texture> Model::loadMaterialTextures(aiMaterial *mat, aiTextureType type, string typeName)
+{
+    vector<Texture> textures;
+    for(unsigned int i = 0; i < mat->GetTextureCount(type); i++)
+    {
+        aiString str;
+        mat->GetTexture(type, i, &str);
+        Texture texture;
+        texture.id = TextureFromFile(str.C_Str(), directory);
+        texture.type = typeName;
+        texture.path = std::string(str.C_Str());
+        textures.push_back(texture);
+    }
+    return textures;
+} 
+
+void Model::loadModel(std::string path)
+{
+    Assimp::Importer import;
+    const aiScene *scene = import.ReadFile(path, aiProcess_Triangulate | aiProcess_FlipUVs);	
+	
+    if(!scene || scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE || !scene->mRootNode) 
+    {
+        std::cout << "ERROR::ASSIMP::" << import.GetErrorString() << std::endl;
+        return;
+    }
+    directory = path.substr(0, path.find_last_of('/'));
+
+    processNode(scene->mRootNode, scene);
+}  
+
+void Model::processNode(aiNode *node, const aiScene *scene)
+{
+    for(unsigned int i = 0; i < node->mNumMeshes; i++)
+    {
+        aiMesh *mesh = scene->mMeshes[node->mMeshes[i]]; 
+        meshes.push_back(processMesh(mesh, scene));			
+    }
+    
+    for(unsigned int i = 0; i < node->mNumChildren; i++)
+    {
+        processNode(node->mChildren[i], scene);
+    }
+}
+
+Mesh Model::processMesh(aiMesh *mesh, const aiScene *scene)
+{
+    std::vector<Vertex> vertices;
+    std::vector<unsigned int> indices;
+    std::vector<Texture> textures;
+
+    for(unsigned int i = 0; i < mesh->mNumVertices; i++)
+    {
+        Vertex vertex;
+        glm::vec3 vector;
+        
+        vector.x = mesh->mVertices[i].x;
+        vector.y = mesh->mVertices[i].y;
+        vector.z = mesh->mVertices[i].z;
+        vertex.Position = vector;
+        
+        if (mesh->HasNormals())
+        {
+            vector.x = mesh->mNormals[i].x;
+            vector.y = mesh->mNormals[i].y;
+            vector.z = mesh->mNormals[i].z;
+            vertex.Normal = vector;
+        }
+        
+        if(mesh->mTextureCoords[0])
+        {
+            glm::vec2 vec;
+            vec.x = mesh->mTextureCoords[0][i].x; 
+            vec.y = mesh->mTextureCoords[0][i].y;
+            vertex.TexCoords = vec;
+        }
+        else
+            vertex.TexCoords = glm::vec2(0.0f, 0.0f);
+
+        vertices.push_back(vertex);
+    }
+    
+    for(unsigned int i = 0; i < mesh->mNumFaces; i++)
+    {
+        aiFace face = mesh->mFaces[i];
+        for(unsigned int j = 0; j < face.mNumIndices; j++)
+            indices.push_back(face.mIndices[j]);        
+    }
+    
+    if(mesh->mMaterialIndex >= 0)
+    {
+        aiMaterial* material = scene->mMaterials[mesh->mMaterialIndex];    
+        std::vector<Texture> diffuseMaps = loadMaterialTextures(material, aiTextureType_DIFFUSE, "texture_diffuse");
+        textures.insert(textures.end(), diffuseMaps.begin(), diffuseMaps.end());
+        std::vector<Texture> specularMaps = loadMaterialTextures(material, aiTextureType_SPECULAR, "texture_specular");
+        textures.insert(textures.end(), specularMaps.begin(), specularMaps.end());
+    }
+    
+    return Mesh(vertices, indices, textures);
+}
+
+
+
+Mesh::Mesh(std::vector<Vertex> vertices, std::vector<unsigned int> indices, std::vector<Texture> textures)
+{
+    this->vertices = vertices;
+    this->indices = indices;
+    this->textures = textures;
+    setupMesh();
+}
+
+void Mesh::setupMesh()
+{
+    glGenVertexArrays(1, &VAO);
+    glGenBuffers(1, &VBO);
+    glGenBuffers(1, &EBO);
+
+    glBindVertexArray(VAO);
+    
+    glBindBuffer(GL_ARRAY_BUFFER, VBO);
+    glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(Vertex), &vertices[0], GL_STATIC_DRAW);  
+
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(unsigned int), &indices[0], GL_STATIC_DRAW);
+
+    glEnableVertexAttribArray(0);	
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)0);
+    
+    glEnableVertexAttribArray(1);	
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, Normal));
+    
+    glEnableVertexAttribArray(2);	
+    glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, TexCoords));
+
+    glBindVertexArray(0);
+}
+
+void Shader::setBool(const std::string &name, bool value) const
+{         
+    glUniform1i(glGetUniformLocation(ID, name.c_str()), (int)value); 
+}
+void Shader::setInt(const std::string &name, int value) const
+{ 
+    glUniform1i(glGetUniformLocation(ID, name.c_str()), value); 
+}
+void Shader::setFloat(const std::string &name, float value) const
+{ 
+    glUniform1f(glGetUniformLocation(ID, name.c_str()), value); 
+} 
+
+void Mesh::Draw(Shader &shader) 
+{
+    unsigned int diffuseNr = 1;
+    unsigned int specularNr = 1;
+    for(unsigned int i = 0; i < textures.size(); i++)
+    {
+        glActiveTexture(GL_TEXTURE0 + i); // activate proper texture unit before binding
+        // retrieve texture number (the N in diffuse_textureN)
+        std::string number;
+        std::string name = textures[i].type;
+        if(name == "texture_diffuse")
+            number = std::to_string(diffuseNr++);
+        else if(name == "texture_specular")
+            number = std::to_string(specularNr++);
+
+        shader.setInt(("material." + name + number).c_str(), i);
+        glBindTexture(GL_TEXTURE_2D, textures[i].id);
+    }
+    glActiveTexture(GL_TEXTURE0);
+
+    // draw mesh
+    glBindVertexArray(VAO);
+    glDrawElements(GL_TRIANGLES, indices.size(), GL_UNSIGNED_INT, 0);
+    glBindVertexArray(0);
+}  
+
+
+void Model::Draw(Shader &shader)
+{
+    for(unsigned int i = 0; i < meshes.size(); i++)
+        meshes[i].Draw(shader);
+}  
+
+Shader::Shader(const char* vertexSource, const char* fragmentSource)
+{
+    // 1. compile vertex shader
+    unsigned int vertex = glCreateShader(GL_VERTEX_SHADER);
+    glShaderSource(vertex, 1, &vertexSource, nullptr);
+    glCompileShader(vertex);
+
+    int success;
+    char infoLog[512];
+    glGetShaderiv(vertex, GL_COMPILE_STATUS, &success);
+    if(!success)
+    {
+        glGetShaderInfoLog(vertex, 512, nullptr, infoLog);
+        std::cout << "ERROR::SHADER::VERTEX::COMPILATION_FAILED\n" << infoLog << std::endl;
+    }
+
+    // 2. compile fragment shader
+    unsigned int fragment = glCreateShader(GL_FRAGMENT_SHADER);
+    glShaderSource(fragment, 1, &fragmentSource, nullptr);
+    glCompileShader(fragment);
+
+    glGetShaderiv(fragment, GL_COMPILE_STATUS, &success);
+    if(!success)
+    {
+        glGetShaderInfoLog(fragment, 512, nullptr, infoLog);
+        std::cout << "ERROR::SHADER::FRAGMENT::COMPILATION_FAILED\n" << infoLog << std::endl;
+    }
+
+    // 3. link program
+    ID = glCreateProgram();
+    glAttachShader(ID, vertex);
+    glAttachShader(ID, fragment);
+    glLinkProgram(ID);
+
+    glGetProgramiv(ID, GL_LINK_STATUS, &success);
+    if(!success)
+    {
+        glGetProgramInfoLog(ID, 512, nullptr, infoLog);
+        std::cout << "ERROR::SHADER::PROGRAM::LINKING_FAILED\n" << infoLog << std::endl;
+    }
+
+    // 4. delete shaders after linking
+    glDeleteShader(vertex);
+    glDeleteShader(fragment);
+}
+
+void Shader::use() 
+{ 
+    glUseProgram(ID);
+}
+
 int renderViewport(GLFWwindow* userInterface, unsigned int renderedWidth, unsigned int renderedHeight) {
-    std::vector<float> vertices {
-    1.0f,  1.0f,  1.0f,    0.577f,  0.577f, -0.577f,
-    1.0f, -1.0f, -1.0f,    0.577f,  0.577f, -0.577f,
-    -1.0f,  1.0f, -1.0f,   0.577f,  0.577f, -0.577f,
-
-    1.0f,  1.0f,  1.0f,    0.577f, -0.577f,  0.577f,
-    -1.0f, -1.0f,  1.0f,   0.577f, -0.577f,  0.577f,
-    1.0f, -1.0f, -1.0f,    0.577f, -0.577f,  0.577f,
-
-    1.0f,  1.0f,  1.0f,   -0.577f,  0.577f,  0.577f,
-    -1.0f,  1.0f, -1.0f,  -0.577f,  0.577f,  0.577f,
-    -1.0f, -1.0f,  1.0f,  -0.577f,  0.577f,  0.577f,
-
-    1.0f, -1.0f, -1.0f,   -0.577f, -0.577f, -0.577f,
-    -1.0f, -1.0f,  1.0f,  -0.577f, -0.577f, -0.577f,
-    -1.0f,  1.0f, -1.0f,  -0.577f, -0.577f, -0.577f,
-};
-
-    verticesContainer.push_back(vertices);
-
     renderCircle(30, std::vector<float> {0.0f, 0.0f, 0.0f}, 0.1, renderedWidth, renderedHeight, false);
+
+    Shader shader(vertexShaderSource, fragmentShaderSource);
+    shader.use();
+
+    Model cubeModel((char*)"/home/legion/Documents/vscode/mein engine/uploads_files_2787791_Mercedes+Benz+GLS+580.obj");
 
     std::vector<objData> objsData;
 
@@ -335,7 +673,8 @@ int renderViewport(GLFWwindow* userInterface, unsigned int renderedWidth, unsign
 
             renderObject(v.shaderProgram, v.VAO, v.vectorSize);
         }
-
+        
+        cubeModel.Draw(shader);
 
         glfwSwapBuffers(userInterface);
         glfwPollEvents();
