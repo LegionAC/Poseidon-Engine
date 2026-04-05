@@ -1,2 +1,2 @@
 # Poseidon-Engine
-WIP game engine being developed to learn C++ and OpenGL.
+WIP Game Engine made using Vulkan Graphics API
