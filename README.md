@@ -1,2 +1,2 @@
 # Poseidon-Engine
-WIP Game Engine made using Vulkan Graphics API
+Deprecated Poseidon OpenGL version -- incomplete. 
